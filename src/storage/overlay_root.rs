@@ -8,8 +8,10 @@ use crate::{
     page::SlottedPage,
     pointer::Pointer,
     storage::engine::{Error, StorageEngine},
+    witness::{AccessTracker, Witness},
 };
 use alloy_primitives::{
+    keccak256,
     map::{B256Map, HashMap},
     B256, U256,
 };
@@ -91,6 +93,39 @@ impl OverlayedRoot {
         }
     }
 }
+
+/// Result of computing state root with overlay, including the witness.
+#[derive(Debug)]
+pub struct OverlayedRootWithWitness {
+    /// The computed state root.
+    pub root: B256,
+    /// Updated branch nodes for incremental updates.
+    pub updated_branch_nodes: HashMap<Nibbles, BranchNodeCompact>,
+    /// Storage trie branch updates per account.
+    pub storage_branch_updates: B256Map<HashMap<Nibbles, BranchNodeCompact>>,
+    /// Witness containing all accessed nodes during computation.
+    pub witness: Witness,
+}
+
+impl OverlayedRootWithWitness {
+    pub fn new(overlayed_root: OverlayedRoot, witness: Witness) -> Self {
+        Self {
+            root: overlayed_root.root,
+            updated_branch_nodes: overlayed_root.updated_branch_nodes,
+            storage_branch_updates: overlayed_root.storage_branch_updates,
+            witness,
+        }
+    }
+
+    pub fn new_hash_with_empty_witness(root: B256) -> Self {
+        Self {
+            root,
+            updated_branch_nodes: HashMap::default(),
+            storage_branch_updates: B256Map::default(),
+            witness: Witness::empty(),
+        }
+    }
+}
 struct RootBuilder {
     hash_builder: HashBuilder,
     storage_branch_updates: B256Map<HashMap<Nibbles, BranchNodeCompact>>,
@@ -150,16 +185,79 @@ impl StorageEngine {
         let mut stack = TraversalStack::new();
         stack.push_node(root_node.prefix().clone(), root_node, Rc::new(root_page), overlay);
 
-        self.compute_root_with_overlay(context, &mut stack, &mut root_builder)?;
+        self.compute_root_with_overlay_internal(context, &mut stack, &mut root_builder, None)?;
 
         Ok(root_builder.finalize())
     }
 
-    fn compute_root_with_overlay<'a>(
+    /// Computes the state root with overlay changes and returns a witness of all accessed nodes.
+    ///
+    /// This method is similar to `compute_state_root_with_overlay` but additionally tracks
+    /// all trie nodes that are read from the database during computation. The resulting
+    /// witness can be used for stateless verification.
+    ///
+    /// # Arguments
+    /// * `context` - The transaction context providing snapshot information
+    /// * `overlay` - The overlay state containing pending changes
+    ///
+    /// # Returns
+    /// An `OverlayedRootWithWitness` containing:
+    /// - The computed state root
+    /// - Branch node updates for incremental updates
+    /// - A witness containing all accessed nodes (including siblings during restructuring)
+    pub fn compute_state_root_with_overlay_and_witness(
+        &self,
+        context: &TransactionContext,
+        overlay: OverlayState,
+    ) -> Result<OverlayedRootWithWitness, Error> {
+        if overlay.is_empty() {
+            return Ok(OverlayedRootWithWitness::new_hash_with_empty_witness(
+                context.root_node_hash,
+            ));
+        }
+
+        let mut root_builder = RootBuilder::new();
+        let mut tracker = AccessTracker::new();
+
+        let root_page = if let Some(root_page_id) = context.root_node_page_id {
+            let page = self.get_page(context, root_page_id)?;
+            let slotted_page = SlottedPage::try_from(page).unwrap();
+
+            // Track the root node access
+            let root_node: Node = slotted_page.get_value(0)?;
+            let root_node_rlp = root_node.rlp_encode();
+            let root_node_hash = keccak256(&root_node_rlp);
+            tracker.record(root_node_hash, root_node.prefix().clone(), root_node_rlp.to_vec());
+
+            slotted_page
+        } else {
+            self.add_overlay_to_root_builder(&mut root_builder, &overlay);
+            let result = root_builder.finalize();
+            return Ok(OverlayedRootWithWitness::new(result, tracker.into_witness()));
+        };
+
+        let root_node: Node = root_page.get_value(0)?;
+        let mut stack = TraversalStack::new();
+        stack.push_node(root_node.prefix().clone(), root_node, Rc::new(root_page), overlay);
+
+        self.compute_root_with_overlay_internal(
+            context,
+            &mut stack,
+            &mut root_builder,
+            Some(&mut tracker),
+        )?;
+
+        let result = root_builder.finalize();
+        Ok(OverlayedRootWithWitness::new(result, tracker.into_witness()))
+    }
+
+    /// Internal method for computing root with overlay, optionally tracking accessed nodes.
+    fn compute_root_with_overlay_internal<'a>(
         &'a self,
         context: &TransactionContext,
         stack: &mut TraversalStack<'a>,
         root_builder: &mut RootBuilder,
+        mut tracker: Option<&mut AccessTracker>,
     ) -> Result<(), Error> {
         // Depth first traversal of the trie, starting at the root node.
         // This applies any overlay state to the trie, taking precedence over the trie's own values.
@@ -180,7 +278,7 @@ impl StorageEngine {
                         }
                     }
                     // We have an overlay, need to process the child
-                    self.process_overlayed_child(
+                    self.process_overlayed_child_with_tracker(
                         context,
                         overlay,
                         root_builder,
@@ -188,6 +286,7 @@ impl StorageEngine {
                         &pointer,
                         page,
                         stack,
+                        tracker.as_deref_mut(),
                     )?;
                 }
                 TriePosition::Node(path, page, node) => {
@@ -234,7 +333,7 @@ impl StorageEngine {
                             code_hash,
                             storage_root,
                         } => {
-                            self.process_account_leaf_with_overlay(
+                            self.process_account_leaf_with_overlay_and_tracker(
                                 context,
                                 &matching_overlay,
                                 root_builder,
@@ -244,6 +343,7 @@ impl StorageEngine {
                                 balance_rlp,
                                 code_hash,
                                 storage_root,
+                                tracker.as_deref_mut(),
                             )?;
                         }
                         NodeKind::StorageLeaf { value_rlp } => {
@@ -326,7 +426,8 @@ impl StorageEngine {
         Ok(())
     }
 
-    fn process_account_leaf_with_overlay<'a>(
+    /// Processes an account leaf with optional witness tracking for storage trie traversal.
+    fn process_account_leaf_with_overlay_and_tracker<'a>(
         &'a self,
         context: &TransactionContext,
         overlay: &OverlayState,
@@ -337,6 +438,7 @@ impl StorageEngine {
         mut balance_rlp: ArrayVec<u8, 33>,
         mut code_hash: B256,
         storage_root: Option<Pointer>,
+        mut tracker: Option<&mut AccessTracker>,
     ) -> Result<(), Error> {
         let overlayed_account = overlay.lookup(&path);
         match overlayed_account {
@@ -384,32 +486,50 @@ impl StorageEngine {
                 // load the root storage node
                 if let Some(child_cell) = pointer.location().cell_index() {
                     let root_storage_node: Node = current_page.get_value(child_cell)?;
+
+                    // Track storage root node access
+                    if let Some(ref mut t) = tracker {
+                        let node_rlp = root_storage_node.rlp_encode();
+                        let node_hash = keccak256(&node_rlp);
+                        t.record(node_hash, root_storage_node.prefix().clone(), node_rlp.to_vec());
+                    }
+
                     storage_stack.push_node(
                         root_storage_node.prefix().clone(),
                         root_storage_node,
                         current_page,
                         storage_overlay,
                     );
-                    self.compute_root_with_overlay(
+                    self.compute_root_with_overlay_internal(
                         context,
                         &mut storage_stack,
                         &mut storage_root_builder,
+                        tracker.as_deref_mut(),
                     )?
                 } else {
                     let storage_page =
                         self.get_page(context, pointer.location().page_id().unwrap())?;
                     let slotted_page = SlottedPage::try_from(storage_page)?;
                     let root_storage_node: Node = slotted_page.get_value(0)?;
+
+                    // Track storage root node access
+                    if let Some(ref mut t) = tracker {
+                        let node_rlp = root_storage_node.rlp_encode();
+                        let node_hash = keccak256(&node_rlp);
+                        t.record(node_hash, root_storage_node.prefix().clone(), node_rlp.to_vec());
+                    }
+
                     storage_stack.push_node(
                         root_storage_node.prefix().clone(),
                         root_storage_node,
                         Rc::new(slotted_page),
                         storage_overlay,
                     );
-                    self.compute_root_with_overlay(
+                    self.compute_root_with_overlay_internal(
                         context,
                         &mut storage_stack,
                         &mut storage_root_builder,
+                        tracker.as_deref_mut(),
                     )?;
                 }
             }
@@ -456,7 +576,9 @@ impl StorageEngine {
         root_builder.add_leaf(path, &buf[..account_rlp_length]);
     }
 
-    fn process_overlayed_child<'a>(
+    /// Processes a child node with optional witness tracking.
+    /// This is the key method for tracking sibling nodes during trie restructuring.
+    fn process_overlayed_child_with_tracker<'a>(
         &'a self,
         context: &TransactionContext,
         overlay: OverlayState,
@@ -465,6 +587,7 @@ impl StorageEngine {
         child: &Pointer,
         current_page: Rc<SlottedPage<'a>>,
         stack: &mut TraversalStack<'a>,
+        tracker: Option<&mut AccessTracker>,
     ) -> Result<(), Error> {
         // First consider the overlay. All values in it must already contain the child_path prefix.
         // If the overlay matches the child path, we can add it to the hash builder and skip
@@ -483,6 +606,16 @@ impl StorageEngine {
 
         if let Some(child_cell) = child.location().cell_index() {
             let child_node: Node = current_page.get_value(child_cell)?;
+
+            // Track the child node access (this catches sibling nodes during restructuring)
+            if let Some(tracker) = tracker {
+                let node_rlp = child_node.rlp_encode();
+                let node_hash = keccak256(&node_rlp);
+                let mut full_path = child_path.clone();
+                full_path.extend_from_slice(child_node.prefix());
+                tracker.record(node_hash, full_path, node_rlp.to_vec());
+            }
+
             child_path.extend_from_slice(child_node.prefix());
             stack.push_node(child_path, child_node, current_page, overlay);
         } else {
@@ -490,6 +623,16 @@ impl StorageEngine {
             let child_page = self.get_page(context, child_page_id)?;
             let child_slotted_page = SlottedPage::try_from(child_page).unwrap();
             let child_node: Node = child_slotted_page.get_value(0)?;
+
+            // Track the child node access
+            if let Some(tracker) = tracker {
+                let node_rlp = child_node.rlp_encode();
+                let node_hash = keccak256(&node_rlp);
+                let mut full_path = child_path.clone();
+                full_path.extend_from_slice(child_node.prefix());
+                tracker.record(node_hash, full_path, node_rlp.to_vec());
+            }
+
             child_path.extend_from_slice(child_node.prefix());
             stack.push_node(child_path, child_node, Rc::new(child_slotted_page), overlay);
         }

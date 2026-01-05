@@ -8,7 +8,10 @@ use crate::{
     node::TrieValue,
     overlay::OverlayState,
     path::{AddressPath, StoragePath},
-    storage::{overlay_root::OverlayedRoot, proofs::AccountProof},
+    storage::{
+        overlay_root::{OverlayedRoot, OverlayedRootWithWitness},
+        proofs::AccountProof,
+    },
 };
 use alloy_primitives::{map::HashMap, StorageValue, B256};
 use alloy_trie::Nibbles;
@@ -92,6 +95,27 @@ impl<DB: Deref<Target = Database>, K: TransactionKind> Transaction<DB, K> {
         self.database
             .storage_engine
             .compute_state_root_with_overlay(&self.context, overlay_state)
+            .map_err(|_| TransactionError)
+    }
+
+    /// Computes the state root with overlay changes and returns a witness of all accessed nodes.
+    ///
+    /// This method is similar to `compute_root_with_overlay` but additionally tracks
+    /// all trie nodes that are read from the database during computation. The resulting
+    /// witness can be used for stateless verification.
+    ///
+    /// # Returns
+    /// An `OverlayedRootWithWitness` containing:
+    /// - The computed state root
+    /// - Branch node updates for incremental updates
+    /// - A witness containing all accessed nodes (including siblings during restructuring)
+    pub fn compute_root_with_overlay_and_witness(
+        &self,
+        overlay_state: OverlayState,
+    ) -> Result<OverlayedRootWithWitness, TransactionError> {
+        self.database
+            .storage_engine
+            .compute_state_root_with_overlay_and_witness(&self.context, overlay_state)
             .map_err(|_| TransactionError)
     }
 

@@ -24,6 +24,8 @@ pub mod pointer;
 pub mod snapshot;
 pub mod storage;
 pub mod transaction;
+pub mod witness;
 
 pub use database::Database;
 pub use page::PageManager;
+pub use witness::{AccessTracker, AccessedNode, Witness, WitnessError};
