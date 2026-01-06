@@ -529,7 +529,7 @@ impl StorageEngine {
                         context,
                         &mut storage_stack,
                         &mut storage_root_builder,
-                        tracker.as_deref_mut(),
+                        tracker,
                     )?;
                 }
             }

@@ -151,7 +151,7 @@ fn test_branch_collapse_reads_sibling() {
     let tx = database.begin_ro().unwrap();
     let result = tx.compute_root_with_overlay_and_witness(overlay).unwrap();
 
-    assert!(result.witness.len() > 0, "Witness should contain nodes after mass deletion");
+    assert!(!result.witness.is_empty(), "Witness should contain nodes after mass deletion");
 
     tx.commit().unwrap();
 }
