@@ -228,7 +228,7 @@ impl StorageEngine {
             let root_node: Node = slotted_page.get_value(0)?;
             let root_node_rlp = root_node.rlp_encode();
             let root_node_hash = keccak256(&root_node_rlp);
-            tracker.record(root_node_hash, root_node.prefix().clone(), root_node_rlp.to_vec());
+            tracker.record(root_node_hash, *root_node.prefix(), root_node_rlp.to_vec());
 
             slotted_page
         } else {
@@ -239,7 +239,7 @@ impl StorageEngine {
 
         let root_node: Node = root_page.get_value(0)?;
         let mut stack = TraversalStack::new();
-        stack.push_node(root_node.prefix().clone(), root_node, Rc::new(root_page), overlay);
+        stack.push_node(root_node.prefix().into(), root_node, Rc::new(root_page), overlay);
 
         self.compute_root_with_overlay_internal(
             context,
@@ -492,7 +492,7 @@ impl StorageEngine {
                     if let Some(ref mut t) = tracker {
                         let node_rlp = root_storage_node.rlp_encode();
                         let node_hash = keccak256(&node_rlp);
-                        t.record(node_hash, root_storage_node.prefix().clone(), node_rlp.to_vec());
+                        t.record(node_hash, *root_storage_node.prefix(), node_rlp.to_vec());
                     }
 
                     storage_stack.push_node(
@@ -517,7 +517,7 @@ impl StorageEngine {
                     if let Some(ref mut t) = tracker {
                         let node_rlp = root_storage_node.rlp_encode();
                         let node_hash = keccak256(&node_rlp);
-                        t.record(node_hash, root_storage_node.prefix().clone(), node_rlp.to_vec());
+                        t.record(node_hash, *root_storage_node.prefix(), node_rlp.to_vec());
                     }
 
                     storage_stack.push_node(
@@ -612,9 +612,9 @@ impl StorageEngine {
             if let Some(tracker) = tracker {
                 let node_rlp = child_node.rlp_encode();
                 let node_hash = keccak256(&node_rlp);
-                let mut full_path = child_path.clone();
-                full_path.extend_from_slice(child_node.prefix());
-                tracker.record(node_hash, full_path, node_rlp.to_vec());
+                let mut full_path = child_path;
+                full_path.extend(&child_node.prefix().into());
+                tracker.record_with_path_slice(node_hash, full_path.nibbles(), node_rlp.to_vec());
             }
 
             child_path.extend(&child_node.prefix().into());
@@ -629,9 +629,9 @@ impl StorageEngine {
             if let Some(tracker) = tracker {
                 let node_rlp = child_node.rlp_encode();
                 let node_hash = keccak256(&node_rlp);
-                let mut full_path = child_path.clone();
-                full_path.extend_from_slice(child_node.prefix());
-                tracker.record(node_hash, full_path, node_rlp.to_vec());
+                let mut full_path = child_path;
+                full_path.extend(&child_node.prefix().into());
+                tracker.record_with_path_slice(node_hash, full_path.nibbles(), node_rlp.to_vec());
             }
 
             child_path.extend(&child_node.prefix().into());

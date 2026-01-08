@@ -153,10 +153,10 @@ impl Witness {
             buffer.extend_from_slice(hash.as_slice());
 
             // Path length and path
-            let path_bytes = node.path.as_slice();
+            let path_bytes = node.path.to_vec();
             let path_len = path_bytes.len() as u16;
             buffer.extend_from_slice(&path_len.to_le_bytes());
-            buffer.extend_from_slice(path_bytes);
+            buffer.extend_from_slice(&path_bytes);
 
             // Data length and data
             let data_len = node.data.len() as u32;
@@ -254,11 +254,11 @@ mod tests {
         let path = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
         let data = vec![0xde, 0xad, 0xbe, 0xef];
 
-        tracker.record(hash, path.clone(), data.clone());
+        tracker.record(hash, path, data.clone());
         assert_eq!(tracker.len(), 1);
 
         // Recording same hash again should be a no-op
-        tracker.record(hash, path.clone(), vec![0x00]);
+        tracker.record(hash, path, vec![0x00]);
         assert_eq!(tracker.len(), 1);
 
         // Different hash should be added

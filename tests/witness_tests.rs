@@ -39,7 +39,7 @@ fn test_basic_witness_generation() {
     let mut overlay_mut = OverlayStateMut::new();
     let modified_account = create_account(2000, 2);
     overlay_mut.insert(
-        AddressPath::for_address(addr1).to_nibbles().clone(),
+        AddressPath::for_address(addr1).into(),
         Some(triedb::overlay::OverlayValue::Account(modified_account)),
     );
     let overlay = overlay_mut.freeze();
@@ -75,7 +75,7 @@ fn test_witness_multiple_accounts() {
     let mut overlay_mut = OverlayStateMut::new();
     let modified_account = create_account(9999, 99);
     overlay_mut.insert(
-        AddressPath::for_address(addresses[5]).to_nibbles().clone(),
+        AddressPath::for_address(addresses[5]).into(),
         Some(triedb::overlay::OverlayValue::Account(modified_account)),
     );
     let overlay = overlay_mut.freeze();
@@ -110,7 +110,7 @@ fn test_deletion_witness_includes_sibling() {
     tx.commit().unwrap();
 
     let mut overlay_mut = OverlayStateMut::new();
-    overlay_mut.insert(AddressPath::for_address(addr1).to_nibbles().clone(), None);
+    overlay_mut.insert(AddressPath::for_address(addr1).into(), None);
     let overlay = overlay_mut.freeze();
 
     let tx = database.begin_ro().unwrap();
@@ -144,7 +144,7 @@ fn test_branch_collapse_reads_sibling() {
 
     let mut overlay_mut = OverlayStateMut::new();
     for (addr, _) in accounts.iter().take(10) {
-        overlay_mut.insert(AddressPath::for_address(*addr).to_nibbles().clone(), None);
+        overlay_mut.insert(AddressPath::for_address(*addr).into(), None);
     }
     let overlay = overlay_mut.freeze();
 
@@ -173,7 +173,7 @@ fn test_witness_serialization() {
     let mut overlay_mut = OverlayStateMut::new();
     let modified = create_account(2000, 2);
     overlay_mut.insert(
-        AddressPath::for_address(addr).to_nibbles().clone(),
+        AddressPath::for_address(addr).into(),
         Some(triedb::overlay::OverlayValue::Account(modified)),
     );
     let overlay = overlay_mut.freeze();
@@ -233,7 +233,7 @@ fn test_new_account_empty_db() {
 
     let mut overlay_mut = OverlayStateMut::new();
     overlay_mut.insert(
-        AddressPath::for_address(addr).to_nibbles().clone(),
+        AddressPath::for_address(addr).into(),
         Some(triedb::overlay::OverlayValue::Account(account)),
     );
     let overlay = overlay_mut.freeze();
@@ -271,7 +271,7 @@ fn test_comprehensive_deletion_witness() {
         let (addr_to_delete, _) = &base_accounts[i];
 
         let mut overlay_mut = OverlayStateMut::new();
-        overlay_mut.insert(AddressPath::for_address(*addr_to_delete).to_nibbles().clone(), None);
+        overlay_mut.insert(AddressPath::for_address(*addr_to_delete).into(), None);
         let overlay = overlay_mut.freeze();
 
         let tx = database.begin_ro().unwrap();
@@ -327,7 +327,7 @@ fn test_comprehensive_witness_all_scenarios() {
 
     let mut overlay_mut = OverlayStateMut::new();
     overlay_mut.insert(
-        AddressPath::for_address(update_addr).to_nibbles().clone(),
+        AddressPath::for_address(update_addr).into(),
         Some(triedb::overlay::OverlayValue::Account(updated_account)),
     );
     let overlay = overlay_mut.freeze();
@@ -342,15 +342,15 @@ fn test_comprehensive_witness_all_scenarios() {
     // SCENARIO 2: Multiple updates in different branches
     let mut overlay_mut = OverlayStateMut::new();
     overlay_mut.insert(
-        AddressPath::for_address(initial_accounts[1].0).to_nibbles().clone(),
+        AddressPath::for_address(initial_accounts[1].0).into(),
         Some(triedb::overlay::OverlayValue::Account(create_account(8888, 88))),
     );
     overlay_mut.insert(
-        AddressPath::for_address(initial_accounts[4].0).to_nibbles().clone(),
+        AddressPath::for_address(initial_accounts[4].0).into(),
         Some(triedb::overlay::OverlayValue::Account(create_account(7777, 77))),
     );
     overlay_mut.insert(
-        AddressPath::for_address(initial_accounts[9].0).to_nibbles().clone(),
+        AddressPath::for_address(initial_accounts[9].0).into(),
         Some(triedb::overlay::OverlayValue::Account(create_account(6666, 66))),
     );
     let overlay = overlay_mut.freeze();
@@ -368,7 +368,7 @@ fn test_comprehensive_witness_all_scenarios() {
     let delete_addr = initial_accounts[2].0;
 
     let mut overlay_mut = OverlayStateMut::new();
-    overlay_mut.insert(AddressPath::for_address(delete_addr).to_nibbles().clone(), None);
+    overlay_mut.insert(AddressPath::for_address(delete_addr).into(), None);
     let overlay = overlay_mut.freeze();
 
     let tx = database.begin_ro().unwrap();
@@ -383,9 +383,9 @@ fn test_comprehensive_witness_all_scenarios() {
     tx.commit().unwrap();
 
     let mut overlay_mut = OverlayStateMut::new();
-    overlay_mut.insert(AddressPath::for_address(initial_accounts[0].0).to_nibbles().clone(), None);
-    overlay_mut.insert(AddressPath::for_address(initial_accounts[1].0).to_nibbles().clone(), None);
-    overlay_mut.insert(AddressPath::for_address(initial_accounts[3].0).to_nibbles().clone(), None);
+    overlay_mut.insert(AddressPath::for_address(initial_accounts[0].0).into(), None);
+    overlay_mut.insert(AddressPath::for_address(initial_accounts[1].0).into(), None);
+    overlay_mut.insert(AddressPath::for_address(initial_accounts[3].0).into(), None);
     let overlay = overlay_mut.freeze();
 
     let tx = database.begin_ro().unwrap();
@@ -404,14 +404,14 @@ fn test_comprehensive_witness_all_scenarios() {
     let mut overlay_mut = OverlayStateMut::new();
     let new_addr = Address::from_word(B256::from(U256::from(0xDEADu64)));
     overlay_mut.insert(
-        AddressPath::for_address(new_addr).to_nibbles().clone(),
+        AddressPath::for_address(new_addr).into(),
         Some(triedb::overlay::OverlayValue::Account(create_account(50000, 50))),
     );
     overlay_mut.insert(
-        AddressPath::for_address(initial_accounts[4].0).to_nibbles().clone(),
+        AddressPath::for_address(initial_accounts[4].0).into(),
         Some(triedb::overlay::OverlayValue::Account(create_account(99999, 999))),
     );
-    overlay_mut.insert(AddressPath::for_address(initial_accounts[6].0).to_nibbles().clone(), None);
+    overlay_mut.insert(AddressPath::for_address(initial_accounts[6].0).into(), None);
     let overlay = overlay_mut.freeze();
 
     let tx = database.begin_ro().unwrap();
@@ -422,8 +422,8 @@ fn test_comprehensive_witness_all_scenarios() {
 
     // SCENARIO 6: Subtree deletion
     let mut overlay_mut = OverlayStateMut::new();
-    overlay_mut.insert(AddressPath::for_address(initial_accounts[7].0).to_nibbles().clone(), None);
-    overlay_mut.insert(AddressPath::for_address(initial_accounts[8].0).to_nibbles().clone(), None);
+    overlay_mut.insert(AddressPath::for_address(initial_accounts[7].0).into(), None);
+    overlay_mut.insert(AddressPath::for_address(initial_accounts[8].0).into(), None);
     let overlay = overlay_mut.freeze();
 
     let tx = database.begin_ro().unwrap();
@@ -447,7 +447,7 @@ fn test_comprehensive_witness_all_scenarios() {
 
     let mut overlay_mut = OverlayStateMut::new();
     overlay_mut.insert(
-        AddressPath::for_address(initial_accounts[5].0).to_nibbles().clone(),
+        AddressPath::for_address(initial_accounts[5].0).into(),
         Some(triedb::overlay::OverlayValue::Account(create_account(12345, 123))),
     );
     let overlay = overlay_mut.freeze();
@@ -476,19 +476,19 @@ fn test_comprehensive_witness_all_scenarios() {
 
     for addr in batch_accounts.iter().take(10) {
         overlay_mut.insert(
-            AddressPath::for_address(*addr).to_nibbles().clone(),
+            AddressPath::for_address(*addr).into(),
             Some(triedb::overlay::OverlayValue::Account(create_account(99999, 999))),
         );
     }
 
     for addr in batch_accounts.iter().skip(10).take(10) {
-        overlay_mut.insert(AddressPath::for_address(*addr).to_nibbles().clone(), None);
+        overlay_mut.insert(AddressPath::for_address(*addr).into(), None);
     }
 
     for i in 0..5 {
         let new_addr = Address::from_word(B256::from(U256::from(0x90000u64 + i)));
         overlay_mut.insert(
-            AddressPath::for_address(new_addr).to_nibbles().clone(),
+            AddressPath::for_address(new_addr).into(),
             Some(triedb::overlay::OverlayValue::Account(create_account(i * 1000, i))),
         );
     }
